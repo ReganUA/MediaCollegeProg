@@ -1,0 +1,83 @@
+public abstract class Unit : MonoBehaviour, IUpdatable
+{
+    [field: SerializeField] protected UnitSO Config { get; private set; }
+    public Transform Turret;
+    [SerializeField] internal References Refs;
+
+    [HideInInspector] public Unit Owner { get; private set; }
+    [HideInInspector] public BehaviorMachine BehaviorMachine { get; private set; }
+    public ModuleRuntimeStats StatsCarrier { get; private set; }
+
+
+    public event Action<DamageInfo> TakeDamageEvent;
+    public event Action<DeathInfo> KilledEvent;
+    public event Action OnHealEvent;
+    public event Action OnTakeDamageEvent;
+    public event Action OnDeathEvent;
+
+    public static event Action<Unit> UnitDeathEvent;
+    public void Die()
+    {
+        OnDeathEvent?.Invoke();
+        UnitDeathEvent?.Invoke(this);
+        ClearAttachedParticleSystems();
+        Registerer.UnregisterUpdatable(this);
+        if (this != null)
+            Destroy(gameObject);
+    }
+}
+public class Flame : ProjectileUnit
+{
+    [SerializeField] private Rigidbody _rb;
+
+    private Action _detonate;
+    private void Awake()
+    {
+        _detonate = Detonate;
+    }
+    protected override void OnStart()
+    {
+        OnDeathEvent += _detonate;
+    }
+    public override void OnUpdate(float dt)
+    {
+        base.OnUpdate(dt);
+
+        if (this == null) return;
+
+        ref readonly var s = ref GetUnitStatsBillboard();
+
+        EnforcerContext gravCon = new(Vector3.down, MoveState, dt);
+        s.GravityEnforcer.Enforce(in gravCon, StatsCarrier);
+
+        EnforcerContext moveCon = new(transform.forward, MoveState, dt);
+        s.MoveEnforcer.Enforce(in moveCon, StatsCarrier);
+
+
+        EnforcerContext rotCon = new(transform.forward, MoveState, dt);
+        s.RotateEnforcer.Enforce(in rotCon, StatsCarrier);
+
+        _rb.linearVelocity = MoveState.FinalVelocity;
+        _rb.rotation = MoveState.FinalRotation;
+    }
+
+    private void OnCollisionEnter(Collision collider)
+    {
+        if (collider.gameObject.CompareTag("Environment"))
+        {
+            OnDeathEvent -= _detonate;
+            Collide();
+        }
+        else if (collider.gameObject.CompareTag("Unit"))
+        {
+            if (collider.gameObject.TryGetComponent(out Unit u))
+            {
+                if (ability.QualifyTarget(u, Owner))
+                {
+                    OnDeathEvent -= _detonate;
+                    Hit(u);
+                }
+            }
+        }
+    }
+}
